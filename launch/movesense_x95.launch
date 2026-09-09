@@ -1,0 +1,130 @@
+<launch>
+  <!-- Defaults below target active (A / AP) cameras.
+       On a passive (P) camera there is no RGB lens and no DOE projector:
+       set enable_color:=false and enable_stereo:=true (the rectified
+       stereo pair is P's image source); depth->color registration and
+       doe_power have no effect (depth stays in the stereo frame). -->
+
+  <!-- ============ connection / time ============ -->
+  <arg name="camera_ip"             default="192.168.1.70" />  <!-- camera IP -->
+  <arg name="align_time_on_start"   default="false" />         <!-- run one NTP time alignment (alignTimeToHost) on startup -->
+  <arg name="first_frame_wait_ms"   default="5000" />          <!-- block Init until the first frame arrives, then read calibration (0 = do not wait) -->
+
+  <!-- ============ frame / resolution ============ -->
+  <!-- Each stream is 1280x960 or 640x480 only. Color is independent of the
+       stereo/depth pipeline; downsample_mode only affects stereo and depth:
+         stereo 640  + depth 640  -> pre or post, both valid
+         stereo 1280 + depth 640  -> post only (pre would shrink the pair too)
+         stereo 640  + depth 1280 -> unsupported
+         stereo 1280 + depth 1280 -> nothing is downsampled, the mode is ignored -->
+  <arg name="downsample_mode"       default="0" />            <!-- 0 = pre (downsample, then match) / 1 = post (match, then downsample) / -1 = auto -->
+  <arg name="depth_fps"             default="25" />            <!-- frame rate 5~25 -->
+  <arg name="stereo_width"          default="640" />           <!-- stereo width: 1280 or 640 -->
+  <arg name="stereo_height"         default="480" />           <!-- stereo height: 960 or 480 -->
+  <arg name="depth_width"           default="640" />           <!-- depth width: 1280 or 640 -->
+  <arg name="depth_height"          default="480" />           <!-- depth height: 960 or 480 -->
+  <arg name="color_width"           default="640" />           <!-- color width: 1280 or 640 (A/AP only) -->
+  <arg name="color_height"          default="480" />           <!-- color height: 960 or 480 (A/AP only) -->
+
+  <!-- ============ stream subscription ============ -->
+  <arg name="enable_stereo"         default="false" />         <!-- left/right rectified images -->
+  <arg name="enable_depth"          default="true" />          <!-- depth image -->
+  <arg name="enable_color"          default="true" />          <!-- RGB rectified color (published as bgr8); A/AP only, set false on P -->
+  <arg name="enable_imu"            default="true" />          <!-- IMU -->
+  <arg name="enable_detection"      default="false" />         <!-- AI detection (YOLO seg) -->
+
+  <!-- ============ stereo exposure / gain ============ -->
+  <arg name="stereo_auto_expo"      default="false" />         <!-- auto exposure on/off -->
+  <arg name="stereo_exposure_us"    default="5000" />          <!-- manual exposure time (us) -->
+  <arg name="stereo_gain_x"         default="1" />             <!-- gain multiplier (1x..16x) -->
+  <arg name="stereo_max_exposure_us" default="65535" />        <!-- exposure upper bound (-1 = keep camera setting) -->
+  <arg name="stereo_min_exposure_us" default="100" />          <!-- exposure lower bound (-1 = keep) -->
+  <arg name="stereo_max_gain_x"     default="16" />            <!-- gain upper bound (-1 = keep) -->
+  <arg name="stereo_min_gain_x"     default="1" />             <!-- gain lower bound (-1 = keep) -->
+
+  <!-- ============ color exposure / gain (effective only with enable_color) ============ -->
+  <arg name="color_auto_expo"       default="false" />
+  <arg name="color_exposure_us"     default="5000" />
+  <arg name="color_gain_x"          default="1" />
+  <arg name="color_max_exposure_us" default="65535" />
+  <arg name="color_min_exposure_us" default="100" />
+  <arg name="color_max_gain_x"      default="16" />
+  <arg name="color_min_gain_x"      default="1" />
+
+  <!-- ============ projector / depth options ============ -->
+  <arg name="doe_power"             default="255" />           <!-- DOE 0..255 (0 = off); -1 = keep camera setting; A/AP only, no DOE on P -->
+  <arg name="registration"          default="1" />             <!-- depth->color registration: 1 = on / 0 = off / -1 = keep; A/AP only, no effect on P -->
+
+  <!-- ============ imu calib export ============ -->
+  <arg name="imu_calib_dir"         default="" />              <!-- output dir for stereo-IMU extrinsics XMLs (empty = skip) -->
+
+  <!-- ============ topics ============ -->
+  <arg name="cam0_topic"            default="/movesense/right/image_rect_raw" />
+  <arg name="cam1_topic"            default="/movesense/left/image_rect_raw" />
+  <arg name="color_topic"           default="/movesense/color/image_rect_color" />
+  <arg name="color_info_topic"      default="/movesense/color/camera_info" />
+  <arg name="depth_topic"           default="/movesense/depth/image_rect_raw" />
+  <arg name="depth_info_topic"      default="/movesense/depth/camera_info" />
+  <arg name="det_topic"             default="/movesense/detections" />
+  <arg name="imu_topic"             default="/movesense/imu" />
+
+  <!-- ============ tf / frame ids ============ -->
+  <arg name="publish_tf"            default="true" />                              <!-- broadcast the static TF tree (turn off when a URDF provides it) -->
+  <arg name="base_frame_id"         default="movesense_link" />                    <!-- tree root -->
+  <arg name="cam0_frame_id"         default="movesense_infra2_optical_frame" />    <!-- right eye -->
+  <arg name="cam1_frame_id"         default="movesense_infra1_optical_frame" />    <!-- left eye = reference frame of all calibration -->
+  <arg name="color_frame_id"        default="movesense_color_optical_frame" />
+  <arg name="det_frame_id"          default="movesense_color_optical_frame" />
+  <arg name="imu_frame_id"          default="movesense_imu_frame" />
+
+  <node pkg="movesense_x95_ros" type="movesense_x95_ros" name="movesense_x95_ros" output="screen">
+    <param name="camera_ip"              value="$(arg camera_ip)" />
+    <param name="align_time_on_start"    value="$(arg align_time_on_start)" />
+    <param name="first_frame_wait_ms"    value="$(arg first_frame_wait_ms)" />
+    <param name="downsample_mode"        value="$(arg downsample_mode)" />
+    <param name="depth_fps"              value="$(arg depth_fps)" />
+    <param name="stereo_width"           value="$(arg stereo_width)" />
+    <param name="stereo_height"          value="$(arg stereo_height)" />
+    <param name="depth_width"            value="$(arg depth_width)" />
+    <param name="depth_height"           value="$(arg depth_height)" />
+    <param name="color_width"            value="$(arg color_width)" />
+    <param name="color_height"           value="$(arg color_height)" />
+    <param name="enable_stereo"          value="$(arg enable_stereo)" />
+    <param name="enable_depth"           value="$(arg enable_depth)" />
+    <param name="enable_color"           value="$(arg enable_color)" />
+    <param name="enable_imu"             value="$(arg enable_imu)" />
+    <param name="enable_detection"       value="$(arg enable_detection)" />
+    <param name="stereo_auto_expo"       value="$(arg stereo_auto_expo)" />
+    <param name="stereo_exposure_us"     value="$(arg stereo_exposure_us)" />
+    <param name="stereo_gain_x"          value="$(arg stereo_gain_x)" />
+    <param name="stereo_max_exposure_us" value="$(arg stereo_max_exposure_us)" />
+    <param name="stereo_min_exposure_us" value="$(arg stereo_min_exposure_us)" />
+    <param name="stereo_max_gain_x"      value="$(arg stereo_max_gain_x)" />
+    <param name="stereo_min_gain_x"      value="$(arg stereo_min_gain_x)" />
+    <param name="color_auto_expo"        value="$(arg color_auto_expo)" />
+    <param name="color_exposure_us"      value="$(arg color_exposure_us)" />
+    <param name="color_gain_x"           value="$(arg color_gain_x)" />
+    <param name="color_max_exposure_us"  value="$(arg color_max_exposure_us)" />
+    <param name="color_min_exposure_us"  value="$(arg color_min_exposure_us)" />
+    <param name="color_max_gain_x"       value="$(arg color_max_gain_x)" />
+    <param name="color_min_gain_x"       value="$(arg color_min_gain_x)" />
+    <param name="doe_power"              value="$(arg doe_power)" />
+    <param name="registration"           value="$(arg registration)" />
+    <param name="imu_calib_dir"          value="$(arg imu_calib_dir)" />
+    <param name="cam0_topic"             value="$(arg cam0_topic)" />
+    <param name="cam1_topic"             value="$(arg cam1_topic)" />
+    <param name="color_topic"            value="$(arg color_topic)" />
+    <param name="color_info_topic"       value="$(arg color_info_topic)" />
+    <param name="depth_topic"            value="$(arg depth_topic)" />
+    <param name="depth_info_topic"       value="$(arg depth_info_topic)" />
+    <param name="det_topic"              value="$(arg det_topic)" />
+    <param name="imu_topic"              value="$(arg imu_topic)" />
+    <param name="publish_tf"             value="$(arg publish_tf)" />
+    <param name="base_frame_id"          value="$(arg base_frame_id)" />
+    <param name="cam0_frame_id"          value="$(arg cam0_frame_id)" />
+    <param name="cam1_frame_id"          value="$(arg cam1_frame_id)" />
+    <param name="color_frame_id"         value="$(arg color_frame_id)" />
+    <param name="det_frame_id"           value="$(arg det_frame_id)" />
+    <param name="imu_frame_id"           value="$(arg imu_frame_id)" />
+  </node>
+</launch>

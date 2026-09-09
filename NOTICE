@@ -1,0 +1,23 @@
+MoveSense X95 ROS Driver (movesense_x95_ros)
+Copyright (c) 2026 Humanplus Intelligent Robotics Technology Co.,Ltd. All rights reserved.
+
+This product is licensed under the Apache License, Version 2.0 (the
+"License"); you may not use this product except in compliance with the
+License. You may obtain a copy of the License at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+-------------------------------------------------------------------------------
+Third-party components
+-------------------------------------------------------------------------------
+
+This ROS 1 (Noetic) package builds against, but does not bundle, the
+following components; they must be provided by the build environment:
+
+  - ROS (roscpp, sensor_msgs, std_msgs, vision_msgs, geometry_msgs, tf2,
+    tf2_ros), BSD-licensed.
+  - OpenCV (https://opencv.org/), Apache License 2.0, used for color format
+    conversion and IMU calibration XML I/O.
+  - MoveSense X95 SDK, Apache License 2.0, located via
+    find_package(MoveSense_X95_SDK). It is a separate component and is NOT
+    bundled with this package.

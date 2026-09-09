@@ -1,0 +1,21 @@
+# Catkin / ROS build artifacts
+build/
+devel/
+install/
+logs/
+.catkin_workspace
+
+# Editor / IDE
+.vs/
+.vscode/
+*.user
+
+# Build artifacts
+*.o
+*.so
+*.so.*
+*.a
+
+# Python cache
+__pycache__/
+*.pyc
