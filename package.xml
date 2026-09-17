@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="2">
   <name>movesense_x95_ros</name>
-  <version>0.1.0</version>
+  <version>0.1.1</version>
   <description>ROS 1 (Noetic) driver for the MoveSense X95-series stereo depth camera (stereo / depth / color / IMU / YOLO detections).</description>
 
   <maintainer email="legal@manplus-ai.com">Humanplus</maintainer>

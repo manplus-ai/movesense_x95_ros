@@ -77,6 +77,42 @@
   <arg name="det_frame_id"          default="movesense_color_optical_frame" />
   <arg name="imu_frame_id"          default="movesense_imu_frame" />
 
+  <!-- ============ roi (crop window per stream, cut on the camera before sending) ============ -->
+  <!-- Streams: left_raw right_raw color_raw left_rect right_rect color_rect (depth cannot be cropped).
+       Coordinates are 0-based pixels in that stream's current output size (after downsampling):
+       window = [x1,x2) x [y1,y2), x1<x2, y1<y2, at least 16x16, all four values even.
+       Needs camera firmware with ROI support; an enabled ROI the camera rejects stops the node. -->
+  <arg name="roi_left_raw_enable"        default="false" />
+  <arg name="roi_left_raw_x1"            default="0" />
+  <arg name="roi_left_raw_y1"            default="0" />
+  <arg name="roi_left_raw_x2"            default="0" />
+  <arg name="roi_left_raw_y2"            default="0" />
+  <arg name="roi_right_raw_enable"       default="false" />
+  <arg name="roi_right_raw_x1"           default="0" />
+  <arg name="roi_right_raw_y1"           default="0" />
+  <arg name="roi_right_raw_x2"           default="0" />
+  <arg name="roi_right_raw_y2"           default="0" />
+  <arg name="roi_color_raw_enable"       default="false" />
+  <arg name="roi_color_raw_x1"           default="0" />
+  <arg name="roi_color_raw_y1"           default="0" />
+  <arg name="roi_color_raw_x2"           default="0" />
+  <arg name="roi_color_raw_y2"           default="0" />
+  <arg name="roi_left_rect_enable"       default="false" />
+  <arg name="roi_left_rect_x1"           default="0" />
+  <arg name="roi_left_rect_y1"           default="0" />
+  <arg name="roi_left_rect_x2"           default="0" />
+  <arg name="roi_left_rect_y2"           default="0" />
+  <arg name="roi_right_rect_enable"      default="false" />
+  <arg name="roi_right_rect_x1"          default="0" />
+  <arg name="roi_right_rect_y1"          default="0" />
+  <arg name="roi_right_rect_x2"          default="0" />
+  <arg name="roi_right_rect_y2"          default="0" />
+  <arg name="roi_color_rect_enable"      default="false" />
+  <arg name="roi_color_rect_x1"          default="0" />
+  <arg name="roi_color_rect_y1"          default="0" />
+  <arg name="roi_color_rect_x2"          default="0" />
+  <arg name="roi_color_rect_y2"          default="0" />
+
   <node pkg="movesense_x95_ros" type="movesense_x95_ros" name="movesense_x95_ros" output="screen">
     <param name="camera_ip"              value="$(arg camera_ip)" />
     <param name="align_time_on_start"    value="$(arg align_time_on_start)" />
@@ -126,5 +162,35 @@
     <param name="color_frame_id"         value="$(arg color_frame_id)" />
     <param name="det_frame_id"           value="$(arg det_frame_id)" />
     <param name="imu_frame_id"           value="$(arg imu_frame_id)" />
+    <param name="roi_left_raw_enable"         value="$(arg roi_left_raw_enable)" />
+    <param name="roi_left_raw_x1"             value="$(arg roi_left_raw_x1)" />
+    <param name="roi_left_raw_y1"             value="$(arg roi_left_raw_y1)" />
+    <param name="roi_left_raw_x2"             value="$(arg roi_left_raw_x2)" />
+    <param name="roi_left_raw_y2"             value="$(arg roi_left_raw_y2)" />
+    <param name="roi_right_raw_enable"        value="$(arg roi_right_raw_enable)" />
+    <param name="roi_right_raw_x1"            value="$(arg roi_right_raw_x1)" />
+    <param name="roi_right_raw_y1"            value="$(arg roi_right_raw_y1)" />
+    <param name="roi_right_raw_x2"            value="$(arg roi_right_raw_x2)" />
+    <param name="roi_right_raw_y2"            value="$(arg roi_right_raw_y2)" />
+    <param name="roi_color_raw_enable"        value="$(arg roi_color_raw_enable)" />
+    <param name="roi_color_raw_x1"            value="$(arg roi_color_raw_x1)" />
+    <param name="roi_color_raw_y1"            value="$(arg roi_color_raw_y1)" />
+    <param name="roi_color_raw_x2"            value="$(arg roi_color_raw_x2)" />
+    <param name="roi_color_raw_y2"            value="$(arg roi_color_raw_y2)" />
+    <param name="roi_left_rect_enable"        value="$(arg roi_left_rect_enable)" />
+    <param name="roi_left_rect_x1"            value="$(arg roi_left_rect_x1)" />
+    <param name="roi_left_rect_y1"            value="$(arg roi_left_rect_y1)" />
+    <param name="roi_left_rect_x2"            value="$(arg roi_left_rect_x2)" />
+    <param name="roi_left_rect_y2"            value="$(arg roi_left_rect_y2)" />
+    <param name="roi_right_rect_enable"       value="$(arg roi_right_rect_enable)" />
+    <param name="roi_right_rect_x1"           value="$(arg roi_right_rect_x1)" />
+    <param name="roi_right_rect_y1"           value="$(arg roi_right_rect_y1)" />
+    <param name="roi_right_rect_x2"           value="$(arg roi_right_rect_x2)" />
+    <param name="roi_right_rect_y2"           value="$(arg roi_right_rect_y2)" />
+    <param name="roi_color_rect_enable"       value="$(arg roi_color_rect_enable)" />
+    <param name="roi_color_rect_x1"           value="$(arg roi_color_rect_x1)" />
+    <param name="roi_color_rect_y1"           value="$(arg roi_color_rect_y1)" />
+    <param name="roi_color_rect_x2"           value="$(arg roi_color_rect_x2)" />
+    <param name="roi_color_rect_y2"           value="$(arg roi_color_rect_y2)" />
   </node>
 </launch>

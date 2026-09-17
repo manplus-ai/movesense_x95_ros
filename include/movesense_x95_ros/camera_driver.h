@@ -43,6 +43,7 @@ private:
     bool m_streaming = false;
     bool m_isPassive = false;
     int m_cameraType = 0;
+    bool m_roiActive = false;
 };
 
 } // namespace movesense_x95_ros

@@ -1,6 +1,6 @@
 # MoveSense X95 ROS 驱动 (movesense_x95_ros)
 
-> **状态:0.1.0 — 早期版本。** 接口(话题 / 参数)在 1.0 之前可能仍有变动。
+> **状态:0.1.1 — 早期版本。** 接口(话题 / 参数)在 1.0 之前可能仍有变动。
 
 MoveSense X95 系列双目深度相机的 ROS 1(Noetic)驱动。通过以太网(借助
 MoveSense X95 SDK)连接相机,用独立线程收帧 / 收 IMU,并发布:
@@ -58,10 +58,11 @@ sudo make install          # 默认装到 /usr/local
 SDK 库本身无第三方依赖。
 
 > **版本对应 —— 混用版本前务必先看这里。**
-> 本驱动基于 **MoveSense X95 SDK 0.2.1** 编译并测试,要求 **0.2.1 或更高**:
-> 标定解析用到的 `<movesense/Simou3CalibLayout.h>` 是 0.2.1 才引入的。更低版本
-> 的 SDK 无法与本包一起编译(0.2.0 及更早还有别的差异 —— `movesense` 命名空间
-> 也是 0.2.0 才有的)。
+> 本驱动基于 **MoveSense X95 SDK 0.2.3** 编译并测试,要求 **0.2.3 或更高**:
+> ROI 参数用到的 `setRoi()` 是 0.2.3 才引入的,标定解析用到的
+> `<movesense/Simou3CalibLayout.h>` 是 0.2.1 引入的。更低版本的 SDK 无法与
+> 本包一起编译(0.2.0 及更早还有别的差异 —— `movesense` 命名空间也是 0.2.0
+> 才有的)。ROI 还需要相机固件支持;老固件上只要不启用 ROI,节点照常运行。
 >
 > 在 SDK 发布 **1.0.0 之前,其公开 API 在各版本之间仍会有较大变动**,请始终让
 > 本驱动与其对应的 SDK 版本配套使用,不要混用。查看当前装的是哪个版本:调用
@@ -111,6 +112,9 @@ rostopic echo /movesense/detections
 话题只在对应流启用时才 advertise:`left` / `right` 需 `enable_stereo:=true`
 (默认关),`color*` 需在 A/AP 机型上开 `enable_color`,`detections` 需
 `enable_detection`。未 advertise 的话题不会出现在 `rostopic list` 里。
+
+某一路启用了 ROI(见[感兴趣区域](#感兴趣区域roi))时,该路图像话题的尺寸是
+裁剪后的尺寸,而不是配置的流分辨率。
 
 ## 相机类型
 
@@ -207,6 +211,39 @@ movesense_link
 默认 `0`(前降), 与默认的 640×480 双目/深度相配。也接受 `-1`(自动): 双目大于深度时用后降,
 其余用前降。
 
+## 感兴趣区域(ROI)
+
+每一路图像都可以**在相机端**裁剪后再发送:网络上只传窗口内的部分,图像话题
+的尺寸也随之变为裁剪后的尺寸。六路各有自己的窗口(`left_raw`、`right_raw`、
+`color_raw`、`left_rect`、`right_rect`、`color_rect`),深度不能裁剪。本节点只
+发布矫正流,所以真正影响话题的是 `left_rect` / `right_rect` / `color_rect`;
+raw 三路的配置同样会下发给相机,但不影响本节点发布的任何内容。
+
+每路参数:`roi_<stream>_enable` 加 `roi_<stream>_x1 / _y1 / _x2 / _y2`。窗口为
+`[x1, x2) × [y1, y2)`,坐标是**该路当前输出尺寸下的 0 基像素** —— 该路降采样
+时按 640×480 算,否则按 1280×960 —— 发布出的图像尺寸为 `(x2-x1) × (y2-y1)`。
+规则:`x1 < x2`、`y1 < y2`、至少 **16×16**、**四个值都是偶数**、窗口不能超出
+该路图像。前四条由 SDK 本地检查,超出图像由相机拒绝。
+
+```bash
+roslaunch movesense_x95_ros movesense_x95.launch enable_stereo:=true \
+    roi_left_rect_enable:=true roi_left_rect_x2:=256 roi_left_rect_y2:=256 \
+    roi_right_rect_enable:=true roi_right_rect_x2:=256 roi_right_rect_y2:=256
+```
+
+行为:
+
+- 启动时六路全部下发,包括关闭的,这样上一个客户端留在相机上的窗口会被清掉。
+  节点退出时再把启用过的窗口清一遍。
+- 启用的窗口若被 SDK 或相机拒绝,节点报错退出,日志里写明是哪一路、什么原因。
+- 相机固件不支持 ROI 时,节点打一条警告继续运行,前提是没有启用任何 ROI。
+- ROI 不改变相机的帧率上限:上限由各路全分辨率 / 降采样的配置决定,与窗口
+  大小无关。
+
+**当前限制:**`camera_info` 与 `/movesense/detections` 尚未随窗口调整。
+`camera_info` 描述的仍是未裁剪的整路图像(主点请自行减去 `x1` / `y1`),
+检测框仍是整图坐标。
+
 ## Launch 参数
 
 | 参数                                          | 默认                | 说明                                                                      |
@@ -230,6 +267,8 @@ movesense_link
 | `color_*`(与 stereo 同一套)                 | —                  | 彩色曝光/增益(仅 A/AP)                                                    |
 | `doe_power`                                 | `255`             | DOE 投射器 0..255(0=关);-1=沿用相机配置                                   |
 | `registration`                              | `1`               | 深度→彩色配准:1 开 / 0 关 / -1 沿用(同时决定深度 camera_info 用哪套内参) |
+| `roi_<stream>_enable`                       | `false`           | 在相机端裁剪该路;`<stream>` = `left_raw` / `right_raw` / `color_raw` / `left_rect` / `right_rect` / `color_rect`(见[ROI](#感兴趣区域roi)) |
+| `roi_<stream>_x1` / `_y1` / `_x2` / `_y2`   | `0`               | 窗口 `[x1,x2)×[y1,y2)`,该路输出像素坐标;都是偶数、至少 16×16                |
 | `imu_calib_dir`                             | `""`              | 非空则启动时导出双目↔IMU 外参 XML                                        |
 | `publish_tf`                                | `true`            | 广播静态 TF 树(见[坐标系](#坐标系frames))                                  |
 | `base_frame_id`                             | `movesense_link`  | TF 树根节点                                                               |
