@@ -18,6 +18,7 @@
 #include <opencv2/core.hpp>
 #include <ros/ros.h>
 #include <sensor_msgs/CameraInfo.h>
+#include <string>
 #include <thread>
 
 using namespace movesense_x95_ros;
@@ -81,6 +82,16 @@ static CameraConfig LoadConfig(ros::NodeHandle& pnh)
     pnh.param<std::string>("color_frame_id", cfg.colorFrameId, cfg.colorFrameId);
     pnh.param<std::string>("det_frame_id", cfg.detFrameId, cfg.detFrameId);
     pnh.param<std::string>("imu_frame_id", cfg.imuFrameId, cfg.imuFrameId);
+
+    for (int i = 0; i < kRoiStreamCount; ++i) {
+        const std::string prefix = std::string("roi_") + RoiStreamName(i) + "_";
+        RoiConfig& r = cfg.roi[i];
+        pnh.param(prefix + "enable", r.enable, r.enable);
+        pnh.param(prefix + "x1", r.x1, r.x1);
+        pnh.param(prefix + "y1", r.y1, r.y1);
+        pnh.param(prefix + "x2", r.x2, r.x2);
+        pnh.param(prefix + "y2", r.y2, r.y2);
+    }
 
     return cfg;
 }

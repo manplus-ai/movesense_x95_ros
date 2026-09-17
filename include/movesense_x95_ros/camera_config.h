@@ -3,9 +3,31 @@
 
 #pragma once
 
+#include <array>
 #include <string>
 
 namespace movesense_x95_ros {
+
+constexpr int kRoiStreamCount = 6;
+
+inline const char* RoiStreamName(int stream)
+{
+    static const char* const names[kRoiStreamCount] = { "left_raw", "right_raw", "color_raw", "left_rect", "right_rect", "color_rect" };
+
+    if (stream < 0 || stream >= kRoiStreamCount) {
+        return "unknown";
+    }
+
+    return names[stream];
+}
+
+struct RoiConfig {
+    bool enable = false;
+    int x1 = 0;
+    int y1 = 0;
+    int x2 = 0;
+    int y2 = 0;
+};
 
 struct CameraConfig {
     std::string cameraIp = "192.168.1.70";
@@ -40,6 +62,7 @@ struct CameraConfig {
     int colorMinGainX = 1;
     int doePower = 255;
     int registration = 1;
+    std::array<RoiConfig, kRoiStreamCount> roi;
     int frameTimeoutMs = 500;
     int firstFrameWaitMs = 5000;
     int imuPollMs = 2;

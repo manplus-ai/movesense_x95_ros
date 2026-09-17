@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <movesense/Simou3Camera.h>
+#include <movesense/Simou3Types.h>
 #include <movesense/transfer_mode_def.h>
 #include <ros/ros.h>
 
@@ -82,6 +83,66 @@ static void ApplyColorSettings(Simou3Camera* cam, const CameraConfig& cfg)
         cam->setRGBExposure(static_cast<unsigned>(cfg.colorExposureUs));
         cam->setRGBGain(GainXToRaw(cfg.colorGainX));
     }
+}
+
+static_assert(static_cast<int>(RoiStream::LeftRaw) == 0 && static_cast<int>(RoiStream::RightRaw) == 1
+        && static_cast<int>(RoiStream::RgbRaw) == 2 && static_cast<int>(RoiStream::LeftRect) == 3
+        && static_cast<int>(RoiStream::RightRect) == 4 && static_cast<int>(RoiStream::RgbRect) == 5 && kRoiStreamCount == 6,
+    "RoiConfig index must follow movesense::RoiStream");
+
+static const char* RoiErrorText(int rc)
+{
+    if (rc == SIMOU3_ERR_ROI_INVALID) {
+        return "invalid rectangle (need x1<x2, y1<y2, at least 16x16, all coordinates even)";
+    }
+
+    if (rc == SIMOU3_ERR_ROI_REJECTED) {
+        return "rejected by camera (outside the stream size, or firmware without ROI support)";
+    }
+
+    return "command failed";
+}
+
+static bool ApplyRoi(Simou3Camera* cam, const CameraConfig& cfg, bool& roiActive)
+{
+    for (int i = 0; i < kRoiStreamCount; ++i) {
+        const RoiConfig& r = cfg.roi[i];
+        const char* name = RoiStreamName(i);
+
+        if (r.enable && (r.x1 < 0 || r.y1 < 0 || r.x2 < 0 || r.y2 < 0)) {
+            ROS_ERROR("[CameraDriver] roi_%s: negative coordinate [%d,%d]-[%d,%d]", name, r.x1, r.y1, r.x2, r.y2);
+            return false;
+        }
+
+        const int rc = cam->setRoi(static_cast<RoiStream>(i), r.enable, static_cast<unsigned>(r.x1), static_cast<unsigned>(r.y1),
+            static_cast<unsigned>(r.x2), static_cast<unsigned>(r.y2));
+
+        if (rc > 0) {
+            if (r.enable) {
+                roiActive = true;
+                ROS_INFO("[CameraDriver] roi_%s enabled [%d,%d]-[%d,%d] -> %dx%d", name, r.x1, r.y1, r.x2, r.y2, r.x2 - r.x1, r.y2 - r.y1);
+            }
+            continue;
+        }
+
+        if (r.enable) {
+            ROS_ERROR("[CameraDriver] setRoi(%s, [%d,%d]-[%d,%d]) failed rc=%d: %s", name, r.x1, r.y1, r.x2, r.y2, rc, RoiErrorText(rc));
+            return false;
+        }
+
+        ROS_WARN("[CameraDriver] setRoi(%s, off) failed rc=%d: %s; ROI is not available on this camera", name, rc, RoiErrorText(rc));
+
+        for (int j = i + 1; j < kRoiStreamCount; ++j) {
+            if (cfg.roi[j].enable) {
+                ROS_ERROR("[CameraDriver] roi_%s requested but ROI is not available on this camera", RoiStreamName(j));
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    return true;
 }
 
 bool CameraDriver::WaitFirstFrame(int totalMs)
@@ -188,6 +249,11 @@ bool CameraDriver::Init(const CameraConfig& cfg)
         m_cam->setRGBDownsample(cd == 1);
     }
 
+    if (!ApplyRoi(m_cam, cfg, m_roiActive)) {
+        Shutdown();
+        return false;
+    }
+
     if (cfg.registration >= 0 && !m_isPassive) {
         m_cam->setRegistrationSwitch(cfg.registration != 0);
     }
@@ -266,6 +332,13 @@ void CameraDriver::Shutdown()
     if (m_streaming) {
         m_cam->closeCamera();
         m_streaming = false;
+    }
+
+    if (m_settingsOpened && m_roiActive) {
+        for (int i = 0; i < kRoiStreamCount; ++i) {
+            m_cam->setRoi(static_cast<RoiStream>(i), false, 0, 0, 0, 0);
+        }
+        m_roiActive = false;
     }
 
     if (m_settingsOpened) {

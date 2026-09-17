@@ -1,6 +1,6 @@
 # MoveSense X95 ROS Driver (movesense_x95_ros)
 
-> **Status: 0.1.0 — early release.** Interfaces (topics / parameters) may
+> **Status: 0.1.1 — early release.** Interfaces (topics / parameters) may
 > still change before 1.0.
 
 ROS 1 (Noetic) driver for the MoveSense X95-series stereo depth camera. It
@@ -63,11 +63,14 @@ used here to parse intrinsics / baseline / color and IMU extrinsics).
 The SDK library itself has no third-party dependencies.
 
 > **Version compatibility — read this before mixing versions.**
-> This driver is built and tested against **MoveSense X95 SDK 0.2.1**, and
-> requires **0.2.1 or newer**: the calibration parsing includes
-> `<movesense/Simou3CalibLayout.h>`, which was introduced in 0.2.1. Older
-> SDKs will not compile against this package (0.2.0 and earlier also differ
-> elsewhere - the `movesense` namespace only appeared in 0.2.0).
+> This driver is built and tested against **MoveSense X95 SDK 0.2.3**, and
+> requires **0.2.3 or newer**: the ROI parameters call `setRoi()`, which was
+> introduced in 0.2.3, and the calibration parsing includes
+> `<movesense/Simou3CalibLayout.h>` (0.2.1). Older SDKs will not compile
+> against this package (0.2.0 and earlier also differ elsewhere - the
+> `movesense` namespace only appeared in 0.2.0). ROI additionally needs
+> camera firmware that implements it; on older firmware the node still runs
+> as long as no ROI is enabled.
 >
 > Until the SDK reaches **1.0.0 its public API is still changing
 > substantially between releases**, so always pair this driver with the SDK
@@ -122,6 +125,10 @@ require `enable_stereo:=true` (off by default), `color*` requires
 `enable_color` on an A/AP camera, and `detections` requires
 `enable_detection`. A topic that is not advertised never appears in
 `rostopic list`.
+
+When a ROI is enabled for a stream (see
+[Region of interest](#region-of-interest-roi)), its image topic carries the
+cropped size instead of the configured stream resolution.
 
 ## Camera types
 
@@ -235,6 +242,47 @@ The default is `0` (pre), matching the default 640×480 stereo and depth
 streams. `-1` (auto) is also accepted: post when stereo is larger than depth,
 pre otherwise.
 
+## Region of interest (ROI)
+
+Each stream can be cropped **on the camera**, before it is sent over the
+network: only the window is transmitted, and the image topic then carries the
+cropped size. Six streams have their own window (`left_raw`, `right_raw`,
+`color_raw`, `left_rect`, `right_rect`, `color_rect`); depth cannot be cropped.
+This node publishes the rectified streams only, so `left_rect` / `right_rect` /
+`color_rect` are the ones that change a topic - the raw entries are forwarded
+to the camera as well but do not affect anything this node publishes.
+
+Per stream: `roi_<stream>_enable` plus `roi_<stream>_x1 / _y1 / _x2 / _y2`.
+The window is `[x1, x2) x [y1, y2)` in **0-based pixels of that stream's
+current output size** - 640x480 coordinates when the stream is downsampled,
+1280x960 otherwise - and the published image is `(x2-x1) x (y2-y1)`. Rules:
+`x1 < x2`, `y1 < y2`, at least **16x16**, **all four values even**, and the
+window must lie inside the stream. The SDK rejects the first four locally; the
+camera rejects a window outside the stream.
+
+```bash
+roslaunch movesense_x95_ros movesense_x95.launch enable_stereo:=true \
+    roi_left_rect_enable:=true roi_left_rect_x2:=256 roi_left_rect_y2:=256 \
+    roi_right_rect_enable:=true roi_right_rect_x2:=256 roi_right_rect_y2:=256
+```
+
+Behavior:
+
+- On startup the node sends all six entries, disabled ones included, so a
+  window left behind by a previous client is cleared. Enabled windows are
+  cleared again when the node exits.
+- An enabled window that the SDK or the camera rejects stops the node with an
+  error that names the stream and the reason.
+- On camera firmware without ROI support the node logs one warning and keeps
+  running, as long as no ROI is enabled.
+- ROI does not change the camera's frame-rate ceiling: that is decided by the
+  full / downsampled stream configuration, not by the window size.
+
+**Current limitation:** `camera_info` and `/movesense/detections` are not yet
+adjusted for the window. `camera_info` still describes the uncropped stream
+(subtract `x1` / `y1` from the principal point yourself), and detection boxes
+stay in full-image coordinates.
+
 ## Launch parameters
 
 | Parameter                                     | Default             | Description                                                                                                 |
@@ -258,6 +306,8 @@ pre otherwise.
 | `color_*` (same set as stereo)              | —                  | color exposure/gain (A/AP only)                                                                             |
 | `doe_power`                                 | `255`             | DOE projector 0..255 (0 = off); -1 = keep camera setting                                                    |
 | `registration`                              | `1`               | depth→color registration: 1 on / 0 off / -1 keep (also selects which intrinsics go into depth camera_info) |
+| `roi_<stream>_enable`                       | `false`           | crop this stream on the camera; `<stream>` = `left_raw` / `right_raw` / `color_raw` / `left_rect` / `right_rect` / `color_rect` (see [ROI](#region-of-interest-roi)) |
+| `roi_<stream>_x1` / `_y1` / `_x2` / `_y2`   | `0`               | window `[x1,x2)×[y1,y2)` in that stream's output pixels; all even, at least 16×16                             |
 | `imu_calib_dir`                             | `""`              | if set, export stereo↔IMU extrinsics XML on startup                                                        |
 | `publish_tf`                                | `true`            | broadcast the static TF tree (see[Frames](#frames))                                                          |
 | `base_frame_id`                             | `movesense_link`  | TF tree root                                                                                                |
