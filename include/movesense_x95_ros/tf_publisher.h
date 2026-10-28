@@ -3,13 +3,15 @@
 
 #pragma once
 
-#include "movesense_x95_ros/camera_config.h"
+#include "movesense_x95/camera_config.h"
 #include "movesense_x95_ros/stereo_calib.h"
 
 #include <memory>
 #include <tf2_ros/static_transform_broadcaster.h>
 
 namespace movesense_x95_ros {
+
+using movesense_x95::CameraConfig;
 
 class TfPublisher {
 public:

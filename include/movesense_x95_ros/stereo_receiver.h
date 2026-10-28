@@ -3,35 +3,18 @@
 
 #pragma once
 
-#include "movesense_x95_ros/common.h"
-#include "movesense_x95_ros/thread_safe_queue.h"
-
-#include <atomic>
-#include <thread>
-
-namespace movesense {
-class Simou3Camera;
-}
-using movesense::Simou3Camera;
+#include "movesense_x95/data_receiver.h"
 
 namespace movesense_x95_ros {
 
-class StereoReceiver {
+using movesense_x95::StereoFrameQueue;
+
+class StereoReceiver : public movesense_x95::FrameReceiver {
 public:
     StereoReceiver();
     ~StereoReceiver();
 
-    bool Init(Simou3Camera* cam, StereoFrameQueue* frameQueue, int timeoutMs);
-    void Shutdown();
-
-private:
-    void Loop();
-
-    Simou3Camera* m_cam = nullptr;
-    StereoFrameQueue* m_frameQueue = nullptr;
-    int m_timeoutMs = 500;
-    std::atomic<bool> m_running { false };
-    std::thread m_thread;
+    bool Init(movesense::Simou3Camera* cam, StereoFrameQueue* queue, int timeoutMs, uint64_t minimumTimestampUs = 0);
 };
 
 } // namespace movesense_x95_ros

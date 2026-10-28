@@ -3,35 +3,18 @@
 
 #pragma once
 
-#include "movesense_x95_ros/common.h"
-#include "movesense_x95_ros/thread_safe_queue.h"
-
-#include <atomic>
-#include <thread>
-
-namespace movesense {
-class Simou3Camera;
-}
-using movesense::Simou3Camera;
+#include "movesense_x95/data_receiver.h"
 
 namespace movesense_x95_ros {
 
-class ImuReceiver {
+using movesense_x95::ImuQueue;
+
+class ImuReceiver : public movesense_x95::RawImuReceiver {
 public:
     ImuReceiver();
     ~ImuReceiver();
 
-    bool Init(Simou3Camera* cam, ImuQueue* imuQueue, int pollMs);
-    void Shutdown();
-
-private:
-    void Loop();
-
-    Simou3Camera* m_cam = nullptr;
-    ImuQueue* m_imuQueue = nullptr;
-    int m_pollMs = 2;
-    std::atomic<bool> m_running { false };
-    std::thread m_thread;
+    bool Init(movesense::Simou3Camera* cam, ImuQueue* queue, int pollMs, uint64_t minimumTimestampUs = 0);
 };
 
 } // namespace movesense_x95_ros

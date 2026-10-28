@@ -3,6 +3,7 @@
 
 #include "movesense_x95_ros/imu_publisher.h"
 
+#include <exception>
 #include <sensor_msgs/Imu.h>
 
 namespace movesense_x95_ros {
@@ -13,18 +14,25 @@ ImuPublisher::~ImuPublisher() {}
 
 bool ImuPublisher::Init(ros::NodeHandle& nh, ImuQueue* imuQueue, const std::string& imuTopic, const std::string& frameId, int queueSize)
 {
-    if (imuQueue == nullptr) {
-        ROS_ERROR("[ImuPublisher] Init null argument");
+    if (imuQueue == nullptr || queueSize < 1 || imuTopic.empty() || frameId.empty() || m_thread.joinable()) {
+        ROS_ERROR("[ImuPublisher] invalid initialization");
         return false;
     }
 
     m_imuQueue = imuQueue;
     m_frameId = frameId;
 
-    m_imuPub = nh.advertise<sensor_msgs::Imu>(imuTopic, queueSize);
-
-    m_running.store(true);
-    m_thread = std::thread(&ImuPublisher::Loop, this);
+    try {
+        m_imuPub = nh.advertise<sensor_msgs::Imu>(imuTopic, queueSize);
+        m_running.store(true);
+        m_thread = std::thread(&ImuPublisher::Loop, this);
+    } catch (const std::exception& error) {
+        m_running.store(false);
+        m_imuQueue = nullptr;
+        m_imuPub.shutdown();
+        ROS_ERROR("[ImuPublisher] initialization failed: %s", error.what());
+        return false;
+    }
 
     return true;
 }
@@ -32,11 +40,15 @@ bool ImuPublisher::Init(ros::NodeHandle& nh, ImuQueue* imuQueue, const std::stri
 void ImuPublisher::Shutdown()
 {
     m_running.store(false);
-    m_imuQueue->Stop();
+    if (m_imuQueue != nullptr) {
+        m_imuQueue->Stop();
+    }
 
     if (m_thread.joinable()) {
         m_thread.join();
     }
+    m_imuQueue = nullptr;
+    m_imuPub.shutdown();
 }
 
 void ImuPublisher::Loop()
@@ -52,6 +64,7 @@ void ImuPublisher::Loop()
 
         if (sample.tsUs == 0) {
             ROS_ERROR_THROTTLE(1.0, "[ImuPublisher] IMU sample has invalid timestamp (tsUs==0)");
+            continue;
         }
         msg.header.stamp.fromNSec(sample.tsUs * 1000ull);
 
