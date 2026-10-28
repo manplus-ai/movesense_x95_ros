@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace movesense_x95_ros {
+namespace movesense_x95 {
 
 struct PlaneData {
     bool valid = false;
@@ -41,4 +41,4 @@ constexpr double GYRO_LSB_TO_DPS = 1.0 / 16.4;
 constexpr double GRAVITY = 9.80665;
 constexpr double DEG_TO_RAD = 3.14159265358979323846 / 180.0;
 
-} // namespace movesense_x95_ros
+}

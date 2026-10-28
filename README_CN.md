@@ -1,314 +1,205 @@
 # MoveSense X95 ROS 驱动 (movesense_x95_ros)
 
-> **状态:0.1.1 — 早期版本。** 接口(话题 / 参数)在 1.0 之前可能仍有变动。
+> **发布版本：0.5.2.20261028，早期版本。** 1.0 前话题和参数可能调整。
 
-MoveSense X95 系列双目深度相机的 ROS 1(Noetic)驱动。通过以太网(借助
-MoveSense X95 SDK)连接相机,用独立线程收帧 / 收 IMU,并发布:
+发布标识由 SDK 0.5.2 和日期组成。ROS 要求三段包版本，因此 package.xml 与 CMake project 使用 0.5.2；VERSION、包导出信息及可执行程序的 --version 输出保留完整的 0.5.2.20261028。
 
-- 左 / 右双目矫正图像
-- 深度图 + 深度相机内参
-- 彩色图 + 彩色相机内参(仅主动式 A / AP)
-- IMU(约 200 Hz)
-- YOLO 检测(`vision_msgs/Detection2DArray`)
+适用于 X95 A / AP / P 的 ROS 1 Noetic 驱动，要求 **MoveSense X95 SDK 0.5.2 或以上**。本版已使用 SDK 0.5.2 编译并在 X95 AP 相机上测试，实测范围见下文。
 
-节点会自动识别相机形态(A / AP / P)并相应调整输出(见[相机类型](#相机类型))。
+## 环境与编译
 
-## 运行环境
+| 项目 | 要求 |
+| --- | --- |
+| 系统 / ROS | Ubuntu 20.04，ROS 1 Noetic，x86-64 |
+| 语言 | C++17 |
+| 依赖 | OpenCV、catkin、roscpp、sensor_msgs、std_msgs、vision_msgs、geometry_msgs、tf2、tf2_ros |
+| 相机网络 | TCP 5001 / 5002；主机对时使用 UDP 5000；可选在线探测使用 UDP 5004 |
 
-| 项       | 要求                    |
-| -------- | ----------------------- |
-| 操作系统 | Ubuntu 20.04(x86-64)    |
-| ROS      | Noetic                  |
-| 编译     | catkin(`catkin_make`) |
-| 网络     | 与相机同网段            |
-
-## 依赖
+先安装独立的 [SDK](https://github.com/manplus-ai/MoveSense_X95_SDK)：
 
 ```bash
-# ROS 包
-sudo apt install ros-noetic-roscpp ros-noetic-sensor-msgs \
-                 ros-noetic-std-msgs ros-noetic-tf2-ros libopencv-dev
-# vision_msgs(若 apt 没有,克隆源码进工作区一起编):
-#   git clone -b noetic-devel https://github.com/ros-perception/vision_msgs.git
+cmake -S MoveSense_X95_SDK -B sdk-build -DCMAKE_BUILD_TYPE=Release
+cmake --build sdk-build --parallel 4
+sudo cmake --install sdk-build
+sudo ldconfig
 ```
 
-### MoveSense X95 SDK
-
-本驱动是 **MoveSense X95 SDK** 的一层薄 ROS 封装,相机侧的活都由 SDK 完成:
-设备发现、四条网络通道、收帧与收 IMU、参数配置、标定回读。SDK 是**独立仓库、
-不随本包分发**,必须先安装:
-
-- 源码:https://github.com/manplus-ai/MoveSense_X95_SDK/
+将本仓库放进 ROS 工作空间的 `src`，用 rosdep 安装 ROS 依赖，然后在工作空间根目录执行：
 
 ```bash
-git clone https://github.com/manplus-ai/MoveSense_X95_SDK.git
-cd MoveSense_X95_SDK
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j4
-sudo make install          # 默认装到 /usr/local
+source /opt/ros/noetic/setup.bash
+catkin_make -DCMAKE_BUILD_TYPE=Release
+catkin_make install
+source install/setup.bash
 ```
 
-之后本包通过 `find_package(MoveSense_X95_SDK REQUIRED)` 找到它并链接导出目标
-`MoveSense::X95_SDK`;只要装在 CMake 会搜索的前缀下(默认 `/usr/local`)就无需
-额外配置。用到两个公开头:`<movesense/Simou3Camera.h>`(相机 API)与
-`<movesense/Simou3CalibLayout.h>`(标定数组字段偏移,本驱动据此解析内参 / 基线 /
-彩色与 IMU 外参)。
+CMake 使用 `find_package(MoveSense_X95_SDK 0.5.2 REQUIRED)`，链接 `MoveSense::X95_SDK`。SDK 安装在自定义位置时，传入 `-DMoveSense_X95_SDK_DIR=<prefix>/lib/cmake/MoveSense_X95_SDK`，并保证运行时能找到其动态库。安装内容包括节点程序、launch 和中英文 README。
 
-SDK 库本身无第三方依赖。
-
-> **版本对应 —— 混用版本前务必先看这里。**
-> 本驱动基于 **MoveSense X95 SDK 0.2.3** 编译并测试,要求 **0.2.3 或更高**:
-> ROI 参数用到的 `setRoi()` 是 0.2.3 才引入的,标定解析用到的
-> `<movesense/Simou3CalibLayout.h>` 是 0.2.1 引入的。更低版本的 SDK 无法与
-> 本包一起编译(0.2.0 及更早还有别的差异 —— `movesense` 命名空间也是 0.2.0
-> 才有的)。ROI 还需要相机固件支持;老固件上只要不启用 ROI,节点照常运行。
->
-> 在 SDK 发布 **1.0.0 之前,其公开 API 在各版本之间仍会有较大变动**,请始终让
-> 本驱动与其对应的 SDK 版本配套使用,不要混用。查看当前装的是哪个版本:调用
-> `<movesense/Simou3Camera.h>` 里的 `simou3_get_version_string()`,或直接看
-> `/usr/local/lib/libMoveSense_X95_SDK.so.*`。
-
-OpenCV(ROS Noetic 自带)用于 NV21→BGR 彩色转换和 IMU 标定 XML 读写。
-
-## 编译
+例如，SDK 安装在 `/path/to/sdk-install` 时：
 
 ```bash
-mkdir -p ~/catkin_ws/src
-cp -r movesense_x95_ros ~/catkin_ws/src/
-cd ~/catkin_ws
-catkin_make
+catkin_make -DCMAKE_BUILD_TYPE=Release -DMoveSense_X95_SDK_DIR=/path/to/sdk-install/lib/cmake/MoveSense_X95_SDK
+catkin_make install
+export LD_LIBRARY_PATH=/path/to/sdk-install/lib:$LD_LIBRARY_PATH
 ```
+
+SDK 头文件和库直接来自已安装的 SDK 包，不复制到本仓库；CMake 导入目标会提供对应的包含路径和链接依赖。本地 `include/movesense_x95/` 存放本驱动的公共实现，需要保留。
 
 ## 运行
 
 ```bash
-source devel/setup.bash
-roslaunch movesense_x95_ros movesense_x95.launch camera_ip:=<相机IP>
+source install/setup.bash
+roslaunch movesense_x95_ros movesense_x95.launch camera_ip:=192.168.1.70
 ```
 
-看数据:
+`rosrun movesense_x95_ros movesense_x95_ros --version` 输出完整发布标识，不连接相机。
+
+默认订阅 RGB、深度和原始 IMU，使用前降采样、640×480、请求 25 FPS。节点会回读并打印实际帧率；实际吞吐量取决于固件、订阅组合和带宽。
+
+P 型没有独立 RGB 镜头和 DOE，使用：
 
 ```bash
-rostopic list | grep movesense
-rosrun rqt_image_view rqt_image_view      # 左 / 右 / 彩色 / 深度
-rostopic echo /movesense/imu
-rostopic echo /movesense/detections
+roslaunch movesense_x95_ros movesense_x95.launch enable_color:=false enable_stereo:=true registration:=0
 ```
 
-## 发布的话题
-
-| 话题                                  | 类型                             | 说明                                                                                 |
-| ------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------ |
-| `/movesense/left/image_rect_raw`    | `sensor_msgs/Image`            | 左目矫正 —`mono8`(A/AP)或 `bgr8`(P)                                             |
-| `/movesense/right/image_rect_raw`   | `sensor_msgs/Image`            | 右目矫正 —`mono8`(A/AP)或 `bgr8`(P)                                             |
-| `/movesense/color/image_rect_color` | `sensor_msgs/Image`            | `bgr8`,**仅主动式 A/AP**(RGB 镜头)                                           |
-| `/movesense/color/camera_info`      | `sensor_msgs/CameraInfo`       | 彩色内参,仅 A/AP                                                                     |
-| `/movesense/depth/image_rect_raw`   | `sensor_msgs/Image`            | `16UC1`,单位 mm;以**右目**视角渲染(与 `right/image_rect_raw` 逐像素对齐)   |
-| `/movesense/depth/camera_info`      | `sensor_msgs/CameraInfo`       | 已矫正,畸变=0;`registration=1` 时为**彩色**内参 + 彩色 frame_id,否则双目内参 |
-| `/movesense/imu`                    | `sensor_msgs/Imu`              | 约 200 Hz,原始加速度/角速度(无姿态)                                                  |
-| `/movesense/detections`             | `vision_msgs/Detection2DArray` | YOLO 检测框(图像坐标系)                                                              |
-
-话题只在对应流启用时才 advertise:`left` / `right` 需 `enable_stereo:=true`
-(默认关),`color*` 需在 A/AP 机型上开 `enable_color`,`detections` 需
-`enable_detection`。未 advertise 的话题不会出现在 `rostopic list` 里。
-
-某一路启用了 ROI(见[感兴趣区域](#感兴趣区域roi))时,该路图像话题的尺寸是
-裁剪后的尺寸,而不是配置的流分辨率。
-
-## 相机类型
-
-节点查询 `getCameraType()` 并自动适配:
-
-| 类型   | 双目(左/右)         | color 话题          | 检测来源 |
-| ------ | ------------------- | ------------------- | -------- |
-| A / AP | `mono8`(灰度)     | RGB 镜头 →`bgr8` | RGB      |
-| P      | `bgr8`(NV21→BGR) | 不发布              | 右目     |
-
-深度始终以右目视角渲染。P 型没有可配准的彩色流,无论 `registration`
-取值,深度都保持在右目视角。
-
-自带 launch 的默认值(`enable_color=true`、`registration=1`、`doe_power=255`)
-面向**主动式 A / AP** 相机。**被动式 P** 相机请设 `enable_color:=false`
-并 `enable_stereo:=true` —— P 没有 RGB 镜头,矫正双目图(以 `bgr8` 发布)
-就是它的图像来源。没有 RGB 镜头,深度→彩色配准也不生效:P 型的深度始终在
-双目坐标系下,camera_info 恒用双目内参,与 `registration` 取值无关。P 也
-没有 DOE 投射器,`doe_power` 同样不适用。这三项在 P 上会被节点忽略并打
-警告日志,不会下发给相机。
-
-## 坐标系(Frames)
-
-节点启动时广播一次下面这棵静态 TF 树(若你自己的 URDF 已提供这些变换,
-可用 `publish_tf:=false` 关闭):
-
-```
-movesense_link
-└── movesense_infra1_frame
-      └── movesense_infra1_optical_frame        <- 左目,所有标定的参考系
-            ├── movesense_infra2_optical_frame  <- 右目(x 方向 +基线)
-            ├── movesense_color_optical_frame   <- 彩色镜头
-            │     └── movesense_imu_frame       <- IMU(A 型)
-            └── movesense_imu_frame             <- IMU(AP / P 型)
-```
-
-**IMU 坐标系挂在哪个父节点下,按相机型号不同**,因为两类机型是对不同相机
-标定的:
-
-| 型号 | IMU 父节点 | 外参来源 |
-| ---- | ---------- | -------- |
-| **A** | `movesense_color_optical_frame` | **彩色**标定数组的 IMU 段 |
-| **AP** / **P** | `movesense_infra1_optical_frame` | **双目**标定数组的 IMU 段 |
-
-节点按相机上报的型号选父节点,不会去猜"哪一段填了就用哪一段"。A 型机上
-彩色坐标系必须在树里(开了彩色流,或深度做了配准),否则 IMU 变换会跳过
-并打印警告。
-
-- `infra1` = **左目**,`infra2` = **右目**。相机内存储的所有外参都以左目
-  为基准,因此 `infra1_optical_frame` 是其它传感器坐标系的父节点。
-- `movesense_link` → `movesense_infra1_frame` 为单位变换;
-  `*_frame` → `*_optical_frame` 这一步承载 REP-103 标准的机体系→光学系
-  旋转(x 右、y 下、z 前),因此标定数值可原样使用,无需任何手工换算。
-- 所有相机坐标系都是**校正后(rectified)**的坐标系:发布的图像已完成校正、
-  畸变为零,下游无需再做去畸变或校正旋转。
-- 右目与彩色相对左目都是**纯平移**(校正后双目行对齐;彩色的校正旋转已烘焙
-  进相机自身的标定),故旋转为单位阵。
-- 彩色与 IMU 的变换只在标定中确实含有对应外参时才广播(彩色还需该坐标系
-  确实被使用);否则节点打印警告并跳过该变换。启动日志里的
-  `[TfPublisher] IMU frame attached to <frame>` 会告诉你实际挂在了谁下面。
-
-深度**不单独建坐标系** —— 它跟随 `registration`,与其 `camera_info` 一致。
-深度图以**右目**视角渲染(主流双目相机以左目为基准,本机型与惯例相反):
-`registration=0` 时深度图位于 `movesense_infra2_optical_frame`;
-`registration=1` 时重投影到 `movesense_color_optical_frame`。
-
-坐标系名称均可配置(`base_frame_id`、`cam0_frame_id`、`cam1_frame_id`、
-`color_frame_id`、`imu_frame_id`、`det_frame_id`);中间的
-`movesense_infra1_frame` 跟随 `cam1_frame_id` 生成。
-
-## 分辨率与降采样
-
-双目 / 深度 / 彩色每路只能是 **1280×960**(全)或 **640×480**(降采样),
-其它尺寸报错退出。
-
-**彩色是独立的。** 相机端中目有自己的矫正组, `color_width` / `color_height` 可以
-单独配, 不受双目/深度牵制, 也不会反过来影响它们。彩色全分辨率 + 深度降采样
-(1280×960 彩色 + 640×480 深度)是受支持的组合。
-
-`downsample_mode` 决定双目/深度这条链在**哪一步**降采样, 只影响这两路:
-
-- **前降**(`0`) — 先降采样, 再匹配深度。匹配跑在小图上, 更快、能上更高帧率, 测距精度低一些。
-- **后降**(`1`) — 先匹配, 再对结果降采样。更准, 但帧率上限更低、DPU 负载更高。
-
-合法组合(**双目 ≥ 深度**):
-
-| 双目 | 深度 | `downsample_mode` |
-| ---- | ---- | ----------------- |
-| 640×480 | 640×480 | `0` / `1` 都可以 |
-| 1280×960 | 640×480 | 只能 `1` —— 前降会把双目一起降下去 |
-| 640×480 | 1280×960 | 不支持, 节点报错退出 |
-| 1280×960 | 1280×960 | 没有降采样, 该项不起作用 |
-
-默认 `0`(前降), 与默认的 640×480 双目/深度相配。也接受 `-1`(自动): 双目大于深度时用后降,
-其余用前降。
-
-## 感兴趣区域(ROI)
-
-每一路图像都可以**在相机端**裁剪后再发送:网络上只传窗口内的部分,图像话题
-的尺寸也随之变为裁剪后的尺寸。六路各有自己的窗口(`left_raw`、`right_raw`、
-`color_raw`、`left_rect`、`right_rect`、`color_rect`),深度不能裁剪。本节点只
-发布矫正流,所以真正影响话题的是 `left_rect` / `right_rect` / `color_rect`;
-raw 三路的配置同样会下发给相机,但不影响本节点发布的任何内容。
-
-每路参数:`roi_<stream>_enable` 加 `roi_<stream>_x1 / _y1 / _x2 / _y2`。窗口为
-`[x1, x2) × [y1, y2)`,坐标是**该路当前输出尺寸下的 0 基像素** —— 该路降采样
-时按 640×480 算,否则按 1280×960 —— 发布出的图像尺寸为 `(x2-x1) × (y2-y1)`。
-规则:`x1 < x2`、`y1 < y2`、至少 **16×16**、**四个值都是偶数**、窗口不能超出
-该路图像。前四条由 SDK 本地检查,超出图像由相机拒绝。
+双目全分辨率、深度半分辨率需要后降采样：
 
 ```bash
-roslaunch movesense_x95_ros movesense_x95.launch enable_stereo:=true \
-    roi_left_rect_enable:=true roi_left_rect_x2:=256 roi_left_rect_y2:=256 \
-    roi_right_rect_enable:=true roi_right_rect_x2:=256 roi_right_rect_y2:=256
+roslaunch movesense_x95_ros movesense_x95.launch enable_stereo:=true stereo_width:=1280 stereo_height:=960 downsample_mode:=1
 ```
 
-行为:
+## 话题与单位
 
-- 启动时六路全部下发,包括关闭的,这样上一个客户端留在相机上的窗口会被清掉。
-  节点退出时再把启用过的窗口清一遍。
-- 启用的窗口若被 SDK 或相机拒绝,节点报错退出,日志里写明是哪一路、什么原因。
-- 相机固件不支持 ROI 时,节点打一条警告继续运行,前提是没有启用任何 ROI。
-- ROI 不改变相机的帧率上限:上限由各路全分辨率 / 降采样的配置决定,与窗口
-  大小无关。
+默认话题前缀为 `/movesense`，话题和 frame 名称可以覆盖。
 
-**当前限制:**`camera_info` 与 `/movesense/detections` 尚未随窗口调整。
-`camera_info` 描述的仍是未裁剪的整路图像(主点请自行减去 `x1` / `y1`),
-检测框仍是整图坐标。
+| 话题后缀 | 消息 | 含义 |
+| --- | --- | --- |
+| `left/image_rect_raw`、`right/image_rect_raw` | Image | 双目校正图，根据 SDK 图像格式解码为 mono8 或 bgr8 |
+| `color/image_rect_color`、`color/camera_info` | Image / CameraInfo | 校正 RGB 及对应内参，仅 A/AP |
+| `depth/image_rect_raw`、`depth/camera_info` | Image / CameraInfo | 16UC1，固定为**毫米**，使用所选配准视角的内参 |
+| `imu` | Imu | 原始比力量测 m/s²、角速度 rad/s，无姿态 |
+| `detections` | Detection2DArray | 源图像应用所配置 ROI 后的像素坐标；A/AP 为 RGB，P 为右目 |
 
-## Launch 参数
+未启用的流不创建发布话题。目前没有左右目 CameraInfo 话题，完整几何参数可以通过 XML 导出。
 
-| 参数                                          | 默认                | 说明                                                                      |
-| --------------------------------------------- | ------------------- | ------------------------------------------------------------------------- |
-| `camera_ip`                                 | 见 launch           | 相机 IP                                                                   |
-| `align_time_on_start`                       | `false`           | 启动时做一次 NTP 对时                                                     |
-| `downsample_mode`                           | `0`               | 0=前降(先降再匹配) / 1=后降(先匹配再降) / -1=自动;只影响双目与深度        |
-| `depth_fps`                                 | `25`              | 5 ~ 25                                                                    |
-| `stereo_width` / `stereo_height`          | `640` / `480`   | 1280×960 或 640×480                                                     |
-| `depth_width` / `depth_height`            | `640` / `480`   | 1280×960 或 640×480                                                     |
-| `color_width` / `color_height`            | `640` / `480`   | 1280×960 或 640×480(A/AP)                                               |
-| `enable_stereo`                             | `false`           | 订阅左右目                                                                |
-| `enable_depth`                              | `true`            | 订阅深度                                                                  |
-| `enable_color`                              | `true`            | 订阅彩色(仅 A/AP)                                                         |
-| `enable_imu`                                | `true`            | 订阅 IMU                                                                  |
-| `enable_detection`                          | `false`           | 订阅 YOLO seg                                                             |
-| `stereo_auto_expo`                          | `false`           | 自动曝光开关                                                              |
-| `stereo_exposure_us` / `stereo_gain_x`    | `5000` / `1`    | 手动曝光(µs)/ 增益(×)                                                   |
-| `stereo_max_exposure_us` / `..._min_...`  | `65535` / `100` | 有效曝光区间(-1 = 沿用相机配置)                                           |
-| `stereo_max_gain_x` / `stereo_min_gain_x` | `16` / `1`      | 有效增益区间(-1 = 沿用相机配置)                                           |
-| `color_*`(与 stereo 同一套)                 | —                  | 彩色曝光/增益(仅 A/AP)                                                    |
-| `doe_power`                                 | `255`             | DOE 投射器 0..255(0=关);-1=沿用相机配置                                   |
-| `registration`                              | `1`               | 深度→彩色配准:1 开 / 0 关 / -1 沿用(同时决定深度 camera_info 用哪套内参) |
-| `roi_<stream>_enable`                       | `false`           | 在相机端裁剪该路;`<stream>` = `left_raw` / `right_raw` / `color_raw` / `left_rect` / `right_rect` / `color_rect`(见[ROI](#感兴趣区域roi)) |
-| `roi_<stream>_x1` / `_y1` / `_x2` / `_y2`   | `0`               | 窗口 `[x1,x2)×[y1,y2)`,该路输出像素坐标;都是偶数、至少 16×16                |
-| `imu_calib_dir`                             | `""`              | 非空则启动时导出双目↔IMU 外参 XML                                        |
-| `publish_tf`                                | `true`            | 广播静态 TF 树(见[坐标系](#坐标系frames))                                  |
-| `base_frame_id`                             | `movesense_link`  | TF 树根节点                                                               |
-| 话题 / frame_id 覆盖项                        | 见 launch           | 各路话题名与`frame_id`                                                  |
+启用检测不会自动启用源图像话题。依赖缺失标定的 CameraInfo 和 TF 不发布；没有有效 RGB 标定时，配准深度无法开始发布。
 
-## IMU 标定外参导出(可选)
+开流前查询 SDK 深度单位，并将计数四舍五入为整数毫米。0 仍表示无效；超过 65535 mm 的距离置 0。此 16UC1 话题不保留亚毫米精度。
 
-把 `imu_calib_dir` 设为一个可写目录,节点连上相机后,**每一段已标定的外参**
-各写 4 个 XML:`r_IMU.xml`(R 3×3)、`t_IMU.xml`(t,mm)、`ts_IMU.xml`
-(时间偏移,ms)、`noise_IMU.xml`(陀螺/加速度噪声密度 + 随机游走)。
+`registration=1` 为 RGB 视角深度，使用 RGB 内参；`0` 为右目视角。配准深度要求有效的 RGB 标定。SDK 没有读取配准开关的接口，因此 `registration=-1` 仅在关闭深度时允许。P 型深度始终使用双目视角。
 
-相机里存了**两套** IMU 外参,导出时按子目录分开、文件名相同(与厂商标定
-工具的布局一致):
+## 参数
 
-| 子目录 | 外参段 | 参考相机 |
-| ------ | ------ | -------- |
-| `<imu_calib_dir>/xml`     | 双目标定数组的 IMU 段 | **左目**校正相机 |
-| `<imu_calib_dir>/xml_rgb` | 彩色标定数组的 IMU 段 | **彩色**校正相机 |
+参数在启动时生效。修改后需重新启动节点。
 
-只导出已标定的段:全 0 或非有限值视为"未标定",该子目录不写。通常 A 型只有
-`xml_rgb`,AP / P 型只有 `xml`。读彩色段需要先读彩色标定,只要设了
-`imu_calib_dir`,节点就会去读(非被动式机型),即使彩色流没开。
+| 参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `camera_ip` | 192.168.1.70 | 相机 IP |
+| `align_time_on_start` | true | 首批数据建立相机时间基准后对齐 SDK 时间戳；失败则停止初始化 |
+| `connection_probe` | true | 每 2 秒通过 UDP 5004 探测在线状态，连续 3 次失败后重连 |
+| `trigger_mode` | 0 | 0 自动；2 外触发；-1 保留并读取当前模式 |
+| `first_frame_wait_ms` | 5000 | 等待首图；IMU-only 模式等待首个非零 IMU 时间戳，1…60000 ms |
+| `depth_fps` | 25 | 请求 5…25 FPS，日志打印实际值 |
+| `stereo_width/height` | 640 / 480 | 640×480 或 1280×960 |
+| `depth_width/height` | 640 / 480 | 640×480 或 1280×960 |
+| `color_width/height` | 640 / 480 | RGB 独立输出分辨率：640×480 或 1280×960 |
+| `downsample_mode` | 0 | 0 前降采样；1 后降采样；-1 按所需几何选择 |
+| `enable_stereo` | false | 左右校正图 |
+| `enable_depth/color/imu` | true | 对应流订阅 |
+| `enable_detection` | false | 检测订阅 |
+| `registration` | 1 | 0 / 1；-1 仅在关闭深度时允许 |
+| `doe_power` | 255 | A/AP 投射器等级 0…255；-1 保留当前值 |
+| `imu_calib_dir` | 空 | XML 导出目录，空值不导出 |
+| `publish_tf` | true | 发布静态 TF 树 |
+| `det_frame_id` | 空 | 自动选择：A/AP 为 RGB，P 为右目；支持显式覆盖 |
 
-格式说明:
+节点没有软触发服务，不支持模式 1。设置 `trigger_mode=1` 会在启动参数校验时退出；保留相机已有的软触发模式会使每次连接尝试失败。启用图像时，收到首帧后才读取标定，因此外触发模式需在 `first_frame_wait_ms` 内提供输入脉冲；自动或外触发模式启动首帧超时，均结束当前连接尝试并继续重试。初始化完成后，允许继续等待后续外触发脉冲。
 
-- 文件为 OpenCV `cv::FileStorage` XML;数值原样导出自相机内存储的标定
-  (与厂商标定工具导出的内容一致)。
-- 字段命名沿用 [kalibr](https://github.com/ethz-asl/kalibr) 惯例
-  (`timeshift_cam_imu`、`*_noise_density`、`*_random_walk`),但单位不同:
-  `t_IMU` 为 **mm**、`ts_IMU` 为 **ms** —— 用于 kalibr 风格 camchain yaml
-  (如 OpenVINS / ORB-SLAM3 的 VIO 配置)前需换算成 m / s。
-- 参考系:**外参相对哪个相机由子目录决定**,两套千万不要混用。`xml` 相对
-  左目校正相机,`xml_rgb` 相对彩色校正相机,都在该相机的光学系
-  (x右 / y下 / z前)下表达。`r_IMU` / `t_IMU` 是 kalibr `T_cam_imu` 的
-  旋转与平移:`R` 把 IMU 系向量变换到该相机系,`t` 是 IMU 原点在该相机系
-  下的坐标(mm)。`ts_IMU` 语义为 `t_imu = t_cam + ts`(ms)。注意深度是以
-  右目为基准的,两套 IMU 外参都不是,所以混用它们的 VIO 配置需要用基线和
-  彩色外参把坐标系接起来。
-- 发布的 IMU 时间戳**没有**应用这个时间偏移。若你的管线需要,请自行补偿。
+双目全尺寸、深度半尺寸要求后降采样；双目半尺寸、深度全尺寸不支持。ROI 不改变各路配置的整图分辨率。
+
+以下后缀分别搭配 `stereo_` 和 `color_`：
+
+| 后缀 | 默认值 | 含义 |
+| --- | --- | --- |
+| `auto_expo` | false | 自动曝光 |
+| `exposure_us` | 5000 | 手动曝光，1…65535 微秒 |
+| `gain_x` | 1 | 手动增益倍数，1…16 |
+| `min_exposure_us / max_exposure_us` | 100 / 65535 | 曝光范围，1…65535 微秒；-1 保留对应限值 |
+| `min_gain_x / max_gain_x` | 1 / 16 | 增益范围，1…16；-1 保留对应限值 |
+
+手动值必须处于已配置范围，已配置的最小值不能大于最大值。相机命令失败会结束当前初始化尝试；先设置几何，再设置帧率，开流后回读实际帧率。
+
+话题覆盖项：`cam0_topic`（右）、`cam1_topic`（左）、`color_topic`、`color_info_topic`、`depth_topic`、`depth_info_topic`、`det_topic`、`imu_topic`。
+Frame 覆盖项：`base_frame_id`、`cam0_frame_id`、`cam1_frame_id`、`color_frame_id`、`det_frame_id`、`imu_frame_id`。默认名称见 launch。
+
+## ROI 与检测坐标
+
+参数形式为 `roi_<stream>_enable/x1/y1/x2/y2`，stream 可取 `left_raw`、`right_raw`、`color_raw`、`left_rect`、`right_rect`、`color_rect`。
+
+各路 `enable` 默认为 `false`，四个坐标均默认为 `0`。
+
+坐标是该路应用 ROI 之前的完整输出图像中的零起点像素；校正图按配置的输出分辨率设置窗口。窗口为半开区间 `[x1,x2) × [y1,y2)`，至少 16×16，四个坐标必须为偶数。深度不支持裁剪。节点只发布校正图，raw ROI 仍对应相机中独立的原始图流。
+
+RGB CameraInfo 描述实际裁剪图：宽高更新，K/P 主点减去窗口原点；ROI 字段保持为空，避免下游重复减偏移。实际图像尺寸与预期几何不一致时不发布 CameraInfo。检测框按 SEG 的 coordW/coordH 缩放，再减去源图 ROI 原点并裁到图像范围；空框、反向框、非有限值和异常 SEG 报文会被丢弃。
+
+每次连接时下发六路 ROI；启用的窗口必须得到相机接受。不支持 ROI 的固件仅允许所有窗口关闭。正常退出时清除本节点启用过的窗口；已知断联时跳过不可达的清窗命令，在重连成功后重新下发所需窗口。
+
+## 时间戳、连接与退出
+
+默认在首帧到达后完成主机对时，IMU-only 模式则等待首个 IMU 样本，避免相机启动时重设 PTS 基准使偏移失效。之后清空 SDK 旧缓存，并过滤仍在途的旧设备时间域样本。PTS 为 0 的样本丢弃。IMU 标定中的相机时间偏移**不会自动应用**。
+
+`align_time_on_start=false` 明确保留设备 PTS，用于诊断，不能与主机时间域的其他传感器或动态 TF 混用。实时相机节点要求 `use_sim_time=false`。
+
+启动时相机不在线，或运行中发生断联，ROS 节点都保持运行。SDK 数据连接关闭，或独立 UDP 在线探测连续 3 次失败后，会停止当前相机会话；清理后每隔 1 秒尝试连接，直到相机恢复或用户停止节点。SDK 建连与设备初始化耗时不包含在这一重试间隔中。
+
+每次连接成功都会重新下发配置、等待首批数据、对时、读取标定并重建 CameraInfo/TF，再恢复发布。各会话使用全新的队列和缓存，不沿用旧连接的数据。节点 PID 不变；发布端点可能重建，已有订阅者会自动重新匹配。
+
+下游 TF 缓冲可能保留已收到的静态变换。更换相机或使标定失效时，可能需要清空或重启下游缓冲；后续会话不再发送某条 TF，并不能撤销消费者已缓存的旧变换。
+
+UDP 5004 在线探测间隔为 2 秒，也能识别 TCP 没有收到关闭通知的静默断网。相机仍在线时的普通图像超时，包括等待外触发，不视为断联。网络禁止 UDP 5004 时可设 connection_probe=false，此时关闭静默断网检测，仅保留 TCP 关闭检测；仅过滤 TCP、UDP 仍可达的故障也无法单靠 UDP 发现。
+
+关闭 `connection_probe` 不会关闭主机对时对 UDP 5000 的独立依赖。
+
+启动校验拒绝的参数会使节点退出；连接或会话初始化失败会继续重试。正常关闭会停止重试、join 线程并关闭相机；关闭 IMU 后退出同样安全，不再使用 detach 强制退出线程。
+
+## 标定与 XML 导出
+
+通过 SDK 0.5.2 结构化接口读取标定，旧固件由 SDK 回退读取。相机内参、逆校正矩阵、基线、IMU 旋转/噪声及可用内参会独立校验。
+
+```bash
+roslaunch movesense_x95_ros movesense_x95.launch imu_calib_dir:=/path/to/calibration
+```
+
+导出目录包含 `calibration_status.xml` 和：
+
+| 子目录 | 相机文件 | IMU 参考系 |
+| --- | --- | --- |
+| `xml` | M1、D1、M2、D2、IR_1、IR_2、t_P2 | 原始左目 |
+| `xml_rgb` | M2、D2、t_P2、iR_2、T_reg、R、T | 原始 RGB，仅 A/AP |
+
+表内文件名均带 `.xml`。有效 IMU 段增加 `r_IMU.xml`、`t_IMU.xml`、`ts_IMU.xml`、`noise_IMU.xml`、`intrinsics_IMU.xml`。A 优先使用 RGB-IMU 标定，AP/P 优先使用双目-IMU 标定；首选段不可用时回退到另一套有效标定，TF 参考系按实际存储的有效外参选择。
+
+导出的图像矩阵保留 SDK 的 1280×960 标定图像域，不会按输出降采样或 ROI 改写；CameraInfo 则描述配置的输出图像，并在 RGB 裁剪开启时补偿窗口原点。
+
+- `r_IMU.xml` / `t_IMU.xml` 是 **IMU → 原始相机**，保留 SDK 数值。平移和基线单位 mm，时偏单位 ms，符号为 `t_imu = t_cam + timeshift`。按下游要求将平移从 mm 换为 m、时偏从 ms 换为 s。
+- `IR_1/IR_2` 是 `(K_rect R_rect)^-1`，不是旋转矩阵。RGB 使用 `R_C_Lr = iR_2 K_out`、`t_C_Lr = R_C_Lr T_reg`，不依据保留的 rotation 字段判断格式。
+- `intrinsics_IMU.xml` 含 `model=scale-misalignment`、`has_intrinsics`；可用时包含四个 3×3 矩阵 `accel_M`、`gyro_M`、`gyro_A`、`gyro_C`。旧设备可能有有效外参但没有这些矩阵；此时 `has_intrinsics=0`，不写矩阵节点。
+- IMU 话题保留原始量测语义，读取矩阵不会自动修正样本或改变 IMU 发布轴系。
+- 静态 TF 会将原始相机外参与 raw→rectified 旋转组合，因此导出的 raw 外参与发布的校正相机 TF 数值有意不同。
+- 读取 `calibration_status.xml` 的 `export_complete=1` 和各项有效标志。重复使用导出目录时，本次失效的已有本导出器 XML 会写入 `valid=0` 并清除旧参数节点，其他用户文件保留。
+
+完整字段和补偿公式见 [SDK 标定参数说明](https://github.com/manplus-ai/MoveSense_X95_SDK/blob/movesense-0.5.2/doc/CALIBRATION_CN.md)。
+
+## 公共实现
+
+不依赖 ROS 的声明位于 `include/movesense_x95/`，非模板实现放在对应源文件：`src/calibration_data.cpp`、`calibration_export.cpp`、`camera_config.cpp`、`camera_session.cpp`、`data_receiver.cpp`、`image_geometry.cpp`、`seg_result.cpp`、`session_supervisor.cpp`。仅模板实现继续保留在头文件。这些文件和公共 CMake 模块在 ROS1/ROS2 两仓中保持字节完全一致。ROS 文件负责日志、参数、消息和节点接口适配。
+
+两个仓库并列存在时，CMake 校验公共文件清单和 SHA256；出现差异直接停止配置。单独克隆任一仓也能构建。`MOVESENSE_VERIFY_PEER_CORE=OFF` 只关闭跨仓校验。
+
+离线回归覆盖标定/TF 组合、坏参数、深度单位、ROI、检测坐标、SEG 边界、未初始化退出及重试状态机。
+
+AP 实机使用每项 8～20 秒稳态采集的短时功能验收，覆盖 640×480 前降采样、双目全尺寸而 RGB/深度半尺寸的后降采样、默认 RGB+深度 25 FPS、RGB ROI 和关闭 IMU。启动时相机不在线、相机服务重启、模拟 20 秒网络中断均能在同一 ROS 进程 PID 中恢复。测试相机有有效的旧版 RGB-IMU 外参，但未配置完整 IMU 内参矩阵，四矩阵路径由离线回归覆盖；本次未测试外触发脉冲、物理拔线、长时间稳定性或其他相机型号。
 
 ## 许可
 
-采用 Apache License 2.0。见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。
+Apache-2.0，见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。

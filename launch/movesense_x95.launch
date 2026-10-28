@@ -7,8 +7,10 @@
 
   <!-- ============ connection / time ============ -->
   <arg name="camera_ip"             default="192.168.1.70" />  <!-- camera IP -->
-  <arg name="align_time_on_start"   default="false" />         <!-- run one NTP time alignment (alignTimeToHost) on startup -->
-  <arg name="first_frame_wait_ms"   default="5000" />          <!-- block Init until the first frame arrives, then read calibration (0 = do not wait) -->
+  <arg name="align_time_on_start"   default="true" />
+  <arg name="connection_probe"       default="true" />
+  <arg name="trigger_mode"          default="0" />
+  <arg name="first_frame_wait_ms"   default="5000" />
 
   <!-- ============ frame / resolution ============ -->
   <!-- Each stream is 1280x960 or 640x480 only. Color is independent of the
@@ -53,10 +55,9 @@
 
   <!-- ============ projector / depth options ============ -->
   <arg name="doe_power"             default="255" />           <!-- DOE 0..255 (0 = off); -1 = keep camera setting; A/AP only, no DOE on P -->
-  <arg name="registration"          default="1" />             <!-- depth->color registration: 1 = on / 0 = off / -1 = keep; A/AP only, no effect on P -->
+  <arg name="registration"          default="1" />
 
-  <!-- ============ imu calib export ============ -->
-  <arg name="imu_calib_dir"         default="" />              <!-- output dir for stereo-IMU extrinsics XMLs (empty = skip) -->
+  <arg name="imu_calib_dir"         default="" />
 
   <!-- ============ topics ============ -->
   <arg name="cam0_topic"            default="/movesense/right/image_rect_raw" />
@@ -72,16 +73,12 @@
   <arg name="publish_tf"            default="true" />                              <!-- broadcast the static TF tree (turn off when a URDF provides it) -->
   <arg name="base_frame_id"         default="movesense_link" />                    <!-- tree root -->
   <arg name="cam0_frame_id"         default="movesense_infra2_optical_frame" />    <!-- right eye -->
-  <arg name="cam1_frame_id"         default="movesense_infra1_optical_frame" />    <!-- left eye = reference frame of all calibration -->
+  <arg name="cam1_frame_id"         default="movesense_infra1_optical_frame" />
   <arg name="color_frame_id"        default="movesense_color_optical_frame" />
-  <arg name="det_frame_id"          default="movesense_color_optical_frame" />
+  <arg name="det_frame_id"          default="" />
   <arg name="imu_frame_id"          default="movesense_imu_frame" />
 
   <!-- ============ roi (crop window per stream, cut on the camera before sending) ============ -->
-  <!-- Streams: left_raw right_raw color_raw left_rect right_rect color_rect (depth cannot be cropped).
-       Coordinates are 0-based pixels in that stream's current output size (after downsampling):
-       window = [x1,x2) x [y1,y2), x1<x2, y1<y2, at least 16x16, all four values even.
-       Needs camera firmware with ROI support; an enabled ROI the camera rejects stops the node. -->
   <arg name="roi_left_raw_enable"        default="false" />
   <arg name="roi_left_raw_x1"            default="0" />
   <arg name="roi_left_raw_y1"            default="0" />
@@ -116,6 +113,8 @@
   <node pkg="movesense_x95_ros" type="movesense_x95_ros" name="movesense_x95_ros" output="screen">
     <param name="camera_ip"              value="$(arg camera_ip)" />
     <param name="align_time_on_start"    value="$(arg align_time_on_start)" />
+    <param name="connection_probe"        value="$(arg connection_probe)" />
+    <param name="trigger_mode"            value="$(arg trigger_mode)" />
     <param name="first_frame_wait_ms"    value="$(arg first_frame_wait_ms)" />
     <param name="downsample_mode"        value="$(arg downsample_mode)" />
     <param name="depth_fps"              value="$(arg depth_fps)" />
@@ -160,7 +159,7 @@
     <param name="cam0_frame_id"          value="$(arg cam0_frame_id)" />
     <param name="cam1_frame_id"          value="$(arg cam1_frame_id)" />
     <param name="color_frame_id"         value="$(arg color_frame_id)" />
-    <param name="det_frame_id"           value="$(arg det_frame_id)" />
+    <param name="det_frame_id"           value="$(arg det_frame_id)" type="str" />
     <param name="imu_frame_id"           value="$(arg imu_frame_id)" />
     <param name="roi_left_raw_enable"         value="$(arg roi_left_raw_enable)" />
     <param name="roi_left_raw_x1"             value="$(arg roi_left_raw_x1)" />

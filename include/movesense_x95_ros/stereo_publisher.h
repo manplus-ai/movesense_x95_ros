@@ -3,8 +3,10 @@
 
 #pragma once
 
-#include "movesense_x95_ros/common.h"
-#include "movesense_x95_ros/thread_safe_queue.h"
+#include "movesense_x95/camera_config.h"
+#include "movesense_x95/common.h"
+#include "movesense_x95/image_geometry.h"
+#include "movesense_x95/thread_safe_queue.h"
 
 #include <atomic>
 #include <ros/ros.h>
@@ -14,6 +16,8 @@
 
 namespace movesense_x95_ros {
 
+using namespace movesense_x95;
+
 class StereoPublisher {
 public:
     StereoPublisher();
@@ -22,8 +26,11 @@ public:
     bool Init(ros::NodeHandle& nh, StereoFrameQueue* frameQueue, const std::string& cam0Topic, const std::string& cam1Topic,
         const std::string& colorTopic, const std::string& depthTopic, const std::string& detTopic, const std::string& cam0FrameId,
         const std::string& cam1FrameId, const std::string& colorFrameId, const std::string& depthFrameId, const std::string& detFrameId,
-        int queueSize, bool enableStereo, bool enableColor, bool enableDetection);
+        int queueSize, bool enableStereo, bool enableColor, bool enableDetection, bool enableDepth = true);
     void Shutdown();
+
+    bool SetDepthUnitMm(double unitMm);
+    void SetImageGeometry(const CameraConfig& cfg, bool isPassive);
 
     void SetDepthCameraInfo(ros::NodeHandle& nh, const std::string& topic, const sensor_msgs::CameraInfo& info, int queueSize);
     void SetColorCameraInfo(ros::NodeHandle& nh, const std::string& topic, const sensor_msgs::CameraInfo& info, int queueSize);
@@ -33,7 +40,7 @@ private:
     void PublishOne(ros::Publisher& pub, const PlaneData& img, const std::string& frameId);
     void PublishColor(const PlaneData& color);
     void PublishDepth(const PlaneData& depth);
-    void PublishDetections(const PlaneData& seg);
+    void PublishDetections(const PlaneData& seg, const PlaneData& source);
 
     StereoFrameQueue* m_frameQueue = nullptr;
     ros::Publisher m_cam0Pub;
@@ -49,7 +56,12 @@ private:
     bool m_hasColorInfo = false;
     bool m_stereoEnabled = false;
     bool m_colorEnabled = false;
+    bool m_depthEnabled = false;
     bool m_detEnabled = true;
+    bool m_detectionSourceRight = false;
+    double m_depthUnitMm = 1.0;
+    ImageGeometry m_colorGeometry;
+    ImageGeometry m_detectionGeometry;
     std::string m_cam0FrameId = "movesense_infra2_optical_frame";
     std::string m_cam1FrameId = "movesense_infra1_optical_frame";
     std::string m_colorFrameId = "movesense_color_optical_frame";

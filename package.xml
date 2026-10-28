@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="2">
   <name>movesense_x95_ros</name>
-  <version>0.1.1</version>
+  <version>0.5.2</version>
   <description>ROS 1 (Noetic) driver for the MoveSense X95-series stereo depth camera (stereo / depth / color / IMU / YOLO detections).</description>
 
   <maintainer email="legal@manplus-ai.com">Humanplus</maintainer>
@@ -21,4 +21,7 @@
   <exec_depend>libopencv-dev</exec_depend>
 
   <!-- external (not rosdep-resolvable): MoveSense_X95_SDK, install it first (see README) -->
+  <export>
+    <movesense_release_version>0.5.2.20261028</movesense_release_version>
+  </export>
 </package>

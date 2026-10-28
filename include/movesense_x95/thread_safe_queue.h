@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "movesense_x95_ros/common.h"
+#include "movesense_x95/common.h"
 
 #include <condition_variable>
 #include <cstdint>
@@ -11,12 +11,15 @@
 #include <mutex>
 #include <utility>
 
-namespace movesense_x95_ros {
+namespace movesense_x95 {
 
-template<typename T>
-class ThreadSafeQueue {
+template <typename T> class ThreadSafeQueue {
 public:
-    explicit ThreadSafeQueue(size_t capacity = 8) : m_capacity(capacity), m_stopped(false) {}
+    explicit ThreadSafeQueue(size_t capacity = 8)
+        : m_capacity(capacity == 0 ? 1 : capacity)
+        , m_stopped(false)
+    {
+    }
 
     void Push(T&& item)
     {
@@ -38,7 +41,6 @@ public:
     bool Pop(T& out)
     {
         std::unique_lock<std::mutex> lock(m_mtx);
-
         m_cv.wait(lock, [this]() { return m_stopped || !m_queue.empty(); });
 
         if (m_queue.empty()) {
@@ -54,7 +56,6 @@ public:
     void Stop()
     {
         std::lock_guard<std::mutex> lock(m_mtx);
-
         m_stopped = true;
         m_cv.notify_all();
     }
@@ -62,7 +63,6 @@ public:
     uint64_t Dropped() const
     {
         std::lock_guard<std::mutex> lock(m_mtx);
-
         return m_dropped;
     }
 
@@ -78,4 +78,4 @@ private:
 using StereoFrameQueue = ThreadSafeQueue<StereoFrame>;
 using ImuQueue = ThreadSafeQueue<ImuSample>;
 
-} // namespace movesense_x95_ros
+}

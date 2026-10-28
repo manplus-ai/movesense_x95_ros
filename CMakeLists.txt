@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(movesense_x95_ros)
+project(movesense_x95_ros VERSION 0.5.2)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,7 +15,9 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 find_package(OpenCV REQUIRED)
-find_package(MoveSense_X95_SDK REQUIRED)
+find_package(MoveSense_X95_SDK 0.5.2 REQUIRED)
+
+include(cmake/MoveSenseX95Core.cmake)
 
 catkin_package(
   CATKIN_DEPENDS roscpp sensor_msgs std_msgs vision_msgs geometry_msgs tf2 tf2_ros
@@ -39,7 +41,19 @@ add_executable(${PROJECT_NAME}
 )
 
 target_link_libraries(${PROJECT_NAME}
-  MoveSense::X95_SDK
+  ${MOVESENSE_X95_CORE_TARGET}
   ${catkin_LIBRARIES}
   ${OpenCV_LIBS}
+)
+
+install(TARGETS ${PROJECT_NAME}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(DIRECTORY launch
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+install(FILES README.md README_CN.md VERSION LICENSE NOTICE
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
